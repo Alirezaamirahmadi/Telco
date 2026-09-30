@@ -1,0 +1,9 @@
+pandas
+numpy
+scikit-learn
+joblib
+pytest
+matplotlib
+jupyter
+notebook
+ipykernel
