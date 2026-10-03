@@ -126,7 +126,7 @@ def prepare_input_data(data):
 
 
 def predict(input_path):
-    """انجام Prediction روی داده جدید."""
+    """Performing prediction on new data."""
 
     # بررسی وجود فایل ورودی
     if not input_path.exists():

@@ -1,9 +1,12 @@
 pandas
 numpy
-scikit-learn
+scikit-learn==1.9.1
 joblib
 pytest
 matplotlib
 jupyter
 notebook
 ipykernel
+fastapi
+uvicorn
+httpx2

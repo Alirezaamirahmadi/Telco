@@ -1,0 +1,38 @@
+[
+    {
+        "run_id": "20261003_144814_692292",
+        "timestamp": "2026-10-03T14:48:14.692308+00:00",
+        "model_type": "LogisticRegression",
+        "hyperparameters": {
+            "max_iter": 1000,
+            "random_state": 42
+        },
+        "train_size": 4225,
+        "validation_size": 1409,
+        "test_size": 1409,
+        "accuracy": 0.8026969481902059,
+        "precision": 0.6509433962264151,
+        "recall": 0.553475935828877,
+        "f1": 0.5982658959537572,
+        "roc_auc": 0.8427652483918469,
+        "model_version": "v1"
+    },
+    {
+        "run_id": "20261003_194803_083754",
+        "timestamp": "2026-10-03T19:48:03.083777+00:00",
+        "model_type": "LogisticRegression",
+        "hyperparameters": {
+            "max_iter": 1000,
+            "random_state": 42
+        },
+        "train_size": 4225,
+        "validation_size": 1409,
+        "test_size": 1409,
+        "accuracy": 0.8026969481902059,
+        "precision": 0.6509433962264151,
+        "recall": 0.553475935828877,
+        "f1": 0.5982658959537572,
+        "roc_auc": 0.8427652483918469,
+        "model_version": "v1"
+    }
+]

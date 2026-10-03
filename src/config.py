@@ -13,11 +13,27 @@ DATA_PATH = (
 )
 
 
-# مسیر ذخیره مدل
+# Model Versioning
+MODEL_VERSION = "v1"
+
 MODEL_PATH = (
     BASE_DIR
     / "models"
-    / "telco_churn_pipeline.joblib"
+    / f"telco_churn_{MODEL_VERSION}.joblib"
+)
+
+METADATA_PATH = (
+    BASE_DIR
+    / "models"
+    / f"metadata_{MODEL_VERSION}.json"
+)
+
+
+# Experiment Tracking
+TRACKING_PATH = (
+    BASE_DIR
+    / "outputs"
+    / "training_runs.json"
 )
 
 
@@ -37,6 +53,8 @@ ID_COLUMN = "customerID"
 
 
 # تنظیمات مدل نهایی
+MODEL_TYPE = "LogisticRegression"
+
 MODEL_PARAMS = {
     "max_iter": 1000,
     "random_state": RANDOM_STATE,

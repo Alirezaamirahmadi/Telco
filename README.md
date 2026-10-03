@@ -36,27 +36,35 @@ Notebook فقط برای **EDA، مقایسه‌ی مدل‌ها و انتخاب
 
 ```text
 Telco/
+├── .github/
+│   └── workflows/
+│       └── ci.yml                  # GitHub Actions CI
 ├── data/
-│   ├── WA_Fn-UseC_-Telco-Customer-Churn.csv   # دیتاست خام
-│   └── prediction_input.csv                    # نمونه ورودی برای src/predict.py
+│   ├── WA_Fn-UseC_-Telco-Customer-Churn.csv
+│   └── prediction_input.csv
 ├── notebooks/
-│   └── exploration.ipynb                        # EDA، مقایسه مدل‌ها و انتخاب مدل نهایی
+│   └── exploration.ipynb
+├── models/
+│   ├── telco_churn_v1.joblib       # Versioned model artifact
+│   └── metadata_v1.json            # Model metadata and metrics
+├── outputs/
+│   └── training_runs.json          # Experiment tracking
 ├── src/
-│   ├── __init__.py          # Package marker
-│   ├── config.py            # تنظیمات متمرکز پروژه
-│   ├── data.py              # Load + Validate + Clean
-│   ├── preprocessing.py     # Preprocessing + Train/Val/Test Split
-│   ├── train.py             # Training و ذخیره‌ی Model Artifact
-│   ├── evaluate.py          # ارزیابی مستقل مدل ذخیره‌شده
-│   └── predict.py           # Prediction مستقل روی داده‌ی جدید
+│   ├── __init__.py
+│   ├── config.py
+│   ├── data.py
+│   ├── preprocessing.py
+│   ├── train.py
+│   ├── evaluate.py
+│   ├── predict.py
+│   ├── tracking.py
+│   └── api.py                      # FastAPI application
 ├── tests/
 │   ├── test_data.py
 │   ├── test_preprocessing.py
-│   └── test_prediction.py
-├── models/
-│   └── telco_churn_pipeline.joblib   # Pipeline کامل ذخیره‌شده
-├── outputs/
-│   └── metrics.json                  # Metricهای Validation و Test
+│   ├── test_prediction.py
+│   └── test_api.py
+├── Dockerfile
 ├── requirements.txt
 ├── README.md
 └── .gitignore
@@ -91,10 +99,13 @@ pip install -r requirements.txt
 | `TEST_SIZE` | `0.20` | سهم Test از کل داده |
 | `VALIDATION_SIZE` | `0.25` | سهم Validation از داده‌ی باقی‌مانده؛ نتیجه حدوداً Train=60٪، Validation=20٪، Test=20٪ |
 | `DATA_PATH` | `data/WA_Fn-UseC_-Telco-Customer-Churn.csv` | مسیر دیتاست |
-| `MODEL_PATH` | `models/telco_churn_pipeline.joblib` | مسیر Model Artifact |
+| `MODEL_PATH` | `models/telco_churn_v1.joblib` | مسیر Model Artifact |
 | `TARGET_COLUMN` | `Churn` | ستون هدف |
 | `ID_COLUMN` | `customerID` | شناسه‌ای که وارد مدل نمی‌شود |
 | `MODEL_PARAMS` | `max_iter=1000`, `random_state=42` | پارامترهای Logistic Regression |
+| `MODEL_VERSION` | `v1` | نسخه مدل |
+| `METADATA_PATH` | `models/metadata_v1.json` | Metadata مدل |
+| `TRACKING_PATH` | `outputs/training_runs.json` | Experiment Tracking | |
 
 منطق Split فقط در `src/preprocessing.py` و داخل تابع `split_data()` قرار دارد و تمام مقادیر Split از `config.py` خوانده می‌شوند.
 
@@ -114,7 +125,7 @@ python -m src.train
    - Categorical: Most-Frequent Imputation + OneHotEncoder
 6. مدل `LogisticRegression` را روی Train آموزش می‌دهد.
 7. کل Pipeline شامل Preprocessing + Model را با `joblib` ذخیره می‌کند.
-8. Metricهای Validation و Test را در `outputs/metrics.json` ذخیره می‌کند.
+8. Metricهای Test را در Metadata مدل و Experiment Tracking ثبت می‌کند.
 
 اجرای Training به Notebook وابسته نیست.
 
@@ -125,7 +136,7 @@ python -m src.evaluate
 ```
 
 این اسکریپت مستقل از Training اجرا می‌شود:
-- Pipeline ذخیره‌شده را با `joblib.load` بارگذاری می‌کند.
+- Pipeline نسخه‌بندی‌شده را با `joblib.load` بارگذاری می‌کند.
 - Dataset را Load، Validate و Clean می‌کند.
 - همان Train/Validation/Test Split را با همان `RANDOM_STATE` بازسازی می‌کند.
 - Metricهای Test را روی داده‌ی Test محاسبه می‌کند.
@@ -197,7 +208,8 @@ pytest
 - **Parameters:** `max_iter=1000`, `random_state=42`
 - **Stored artifact:** یک `sklearn.pipeline.Pipeline` کامل شامل Preprocessing و Model
 - **Format:** `joblib`
-- **Path:** `models/telco_churn_pipeline.joblib`
+- **Path:** `models/telco_churn_v1.joblib`
+- **Metadata:** `models/metadata_v1.json`
 
 ## 12. Metrics
 
@@ -260,7 +272,161 @@ python -m src.predict --input data/prediction_input.csv
 
 هیچ‌کدام از مراحل بالا به Jupyter وابسته نیستند. `notebooks/exploration.ipynb` فقط برای EDA، تحلیل و انتخاب مدل استفاده می‌شود.
 
-## 15. Limitations
+## 15. Model Versioning
+
+مدل به‌صورت Versioned Artifact ذخیره می‌شود:
+
+```text
+models/
+├── telco_churn_v1.joblib
+└── metadata_v1.json
+```
+
+`metadata_v1.json` شامل نسخه مدل، تاریخ آموزش، نسخه دیتاست، نوع مدل، Featureها، Metricها، Random State و Hyperparameters است.
+
+برای تغییر نسخه مدل، مقدار `MODEL_VERSION` در `src/config.py` تغییر داده می‌شود تا Artifact و Metadata جدید با نام نسخه‌ی جدید ذخیره شوند.
+
+## 16. Experiment Tracking
+
+هر اجرای:
+
+```bash
+python -m src.train
+```
+
+یک Run جدید در:
+
+```text
+outputs/training_runs.json
+```
+
+ثبت می‌کند. اطلاعات Run شامل `run_id`، زمان اجرا، نوع مدل، Hyperparameters، اندازه Train/Validation/Test، Metricها و Model Version است.
+
+## 17. FastAPI
+
+اجرای API:
+
+```bash
+uvicorn src.api:app --host 0.0.0.0 --port 8000
+```
+
+### Health
+
+```http
+GET /health
+```
+
+نمونه پاسخ:
+
+```json
+{
+  "status": "ok",
+  "model_loaded": true,
+  "model_version": "v1"
+}
+```
+
+اگر Model Artifact قابل Load نباشد، `model_loaded` برابر `false` و `status` برابر `error` خواهد بود.
+
+### Prediction
+
+```http
+POST /predict
+Content-Type: application/json
+```
+
+نمونه Request:
+
+```json
+{
+  "gender": "Male",
+  "SeniorCitizen": 0,
+  "Partner": "Yes",
+  "Dependents": "No",
+  "tenure": 12,
+  "PhoneService": "Yes",
+  "MultipleLines": "No",
+  "InternetService": "DSL",
+  "OnlineSecurity": "No",
+  "OnlineBackup": "Yes",
+  "DeviceProtection": "No",
+  "TechSupport": "No",
+  "StreamingTV": "No",
+  "StreamingMovies": "No",
+  "Contract": "Month-to-month",
+  "PaperlessBilling": "Yes",
+  "PaymentMethod": "Electronic check",
+  "MonthlyCharges": 70.0,
+  "TotalCharges": 840.0
+}
+```
+
+نمونه Response:
+
+```json
+{
+  "prediction": 0,
+  "probability": 0.3009071176019144,
+  "model_version": "v1"
+}
+```
+
+API با Pydantic ورودی را Validation می‌کند و Missing Field، Type اشتباه، مقدار Categorical نامعتبر، مقدار Numeric نامعتبر و Extra Field را رد می‌کند.
+
+## 18. API Testing
+
+تست‌های API در `tests/test_api.py` قرار دارند و بدون اجرای دستی Server با `FastAPI TestClient` اجرا می‌شوند:
+
+```bash
+pytest -v
+```
+
+موارد اصلی:
+- `test_health`
+- `test_valid_prediction`
+- `test_invalid_input`
+- `test_model_loaded`
+
+## 19. Docker
+
+ساخت Image:
+
+```bash
+docker build -t telco-churn-api .
+```
+
+اجرای Container:
+
+```bash
+docker run --rm -p 8000:8000 telco-churn-api
+```
+
+API سپس روی:
+
+```text
+http://127.0.0.1:8000
+```
+
+در دسترس خواهد بود.
+
+Docker به مسیرهای لوکال ویندوز وابسته نیست و Model Artifact و کد لازم را داخل Image قرار می‌دهد.
+
+## 20. Continuous Integration
+
+فایل:
+
+```text
+.github/workflows/ci.yml
+```
+
+با هر `push` و `pull_request`:
+1. Repository را Checkout می‌کند.
+2. Python 3.14 را آماده می‌کند.
+3. Dependencies را نصب می‌کند.
+4. `pytest -v` را اجرا می‌کند.
+5. در صورت موفقیت تست‌ها، Docker Image را Build می‌کند.
+
+## 21. Limitations
 
 - مدل نهایی Logistic Regression است و منطق مقایسه‌ی چند مدل در Notebook انجام شده؛ در `src/train.py` فقط مدل نهایی اجرا می‌شود.
 - Recall مدل روی Test برابر **0.5535** است؛ بنابراین بخشی از مشتریان Churn در این مدل شناسایی نمی‌شوند.

@@ -1,5 +1,6 @@
 import json
 import logging
+from datetime import datetime, timezone
 
 import joblib
 from sklearn.linear_model import LogisticRegression
@@ -13,16 +14,21 @@ from sklearn.metrics import (
 from sklearn.pipeline import Pipeline
 
 from .config import (
+    DATA_PATH,
+    METADATA_PATH,
     MODEL_PATH,
     MODEL_PARAMS,
-    OUTPUTS_DIR,
-    TARGET_COLUMN,
+    MODEL_TYPE,
+    MODEL_VERSION,
+    RANDOM_STATE,
+    TRACKING_PATH,
 )
 from .data import load_data, validate_data, clean_data
-from .preprocessing import create_preprocessor, split_data
+from .preprocessing import split_data, create_preprocessor
+from .tracking import log_training_run
 
 
-# تنظیمات اولیه Logging
+# تنظیم Logging برای نمایش اطلاعات مهم Training
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -31,95 +37,84 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def evaluate_model(model, X, y):
-    """Calculation of model evaluation metrics."""
+def calculate_metrics(y_true, predictions, probabilities):
+    """Calculating model evaluation metrics."""
 
-    # پیش‌بینی کلاس‌ها
-    predictions = model.predict(X)
-
-    # احتمال تعلق نمونه به کلاس Churn
-    probabilities = model.predict_proba(X)[:, 1]
-
-    # محاسبه معیارهای ارزیابی
     metrics = {
-        "accuracy": accuracy_score(y, predictions),
-        "precision": precision_score(
-            y,
-            predictions,
-            zero_division=0,
-        ),
-        "recall": recall_score(
-            y,
-            predictions,
-            zero_division=0,
-        ),
-        "f1": f1_score(
-            y,
-            predictions,
-            zero_division=0,
-        ),
-        "roc_auc": roc_auc_score(
-            y,
-            probabilities,
-        ),
+        "accuracy": accuracy_score(y_true, predictions),
+        "precision": precision_score(y_true, predictions, zero_division=0),
+        "recall": recall_score(y_true, predictions, zero_division=0),
+        "f1": f1_score(y_true, predictions, zero_division=0),
+        "roc_auc": roc_auc_score(y_true, probabilities),
     }
 
     return metrics
 
 
-def main():
-    """Full execution of the model training process."""
+def save_model_metadata(features, metrics):
+    """Store metadata related to the model version.
+    The metadata contains the information necessary to identify and
+    reproduce the model artifact.
+    """
 
-    logger.info("Training process started.")
+    metadata = {
+        "model_version": MODEL_VERSION,
+        "training_date": datetime.now(timezone.utc).isoformat(),
+        "dataset_version": DATA_PATH.name,
+        "model_type": MODEL_TYPE,
+        "features": features,
+        "metrics": metrics,
+        "random_state": RANDOM_STATE,
+        "hyperparameters": MODEL_PARAMS,
+    }
 
-    # ایجاد پوشه‌های موردنیاز در صورت نبودن آن‌ها
-    MODEL_PATH.parent.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
+    # اطمینان از وجود پوشه models
+    METADATA_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-    OUTPUTS_DIR.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
+    # ذخیره Metadata در فایل JSON
+    with METADATA_PATH.open("w", encoding="utf-8") as file:
+        json.dump(metadata, file, indent=4)
 
-    # -------------------------
-    # 1. Load Data
-    # -------------------------
+    logger.info("Model metadata saved to: %s", METADATA_PATH)
 
-    logger.info("Loading dataset.")
 
-    df = load_data()
+def train():
+    """
+Execution of the complete training process.
 
-    logger.info(
-        "Raw dataset shape: %s",
-        df.shape,
-    )
+    Steps:
+    1. Load Dataset
+    2. Validate Dataset
+    3. Clean Dataset
+    4. Split Dataset
+    5. Create Preprocessing Pipeline
+    6. Train Model
+    7. Evaluate Model
+    8. Save Versioned Model
+    9. Save Model Metadata
+    10. Register Training Run
+    """
 
-    # -------------------------
-    # 2. Validate Data
-    # -------------------------
+    logger.info("Starting training process.")
 
-    logger.info("Validating dataset.")
+    # ---------------------------------------------------------
+    # 1. Load Dataset
+    # ---------------------------------------------------------
+    df = load_data(DATA_PATH)
 
+    # ---------------------------------------------------------
+    # 2. Validate Dataset
+    # ---------------------------------------------------------
     df = validate_data(df)
 
-    # -------------------------
-    # 3. Clean Data
-    # -------------------------
-
-    logger.info("Cleaning dataset.")
-
+    # ---------------------------------------------------------
+    # 3. Clean Dataset
+    # ---------------------------------------------------------
     df = clean_data(df)
 
-    # -------------------------
-    # 4. Split Data
-    # -------------------------
-
-    # تقسیم داده فقط از طریق تابع مرکزی split_data انجام می‌شود
-    # بنابراین تنظیمات Split فقط در config.py قرار دارند
-    logger.info("Splitting dataset.")
-
+    # ---------------------------------------------------------
+    # 4. Split Dataset
+    # ---------------------------------------------------------
     (
         X_train,
         X_val,
@@ -130,146 +125,101 @@ def main():
     ) = split_data(df)
 
     logger.info(
-        "Train size: %d",
+        "Dataset split completed: train=%d, validation=%d, test=%d",
         len(X_train),
-    )
-
-    logger.info(
-        "Validation size: %d",
         len(X_val),
-    )
-
-    logger.info(
-        "Test size: %d",
         len(X_test),
     )
 
-    # -------------------------
-    # 5. Create Preprocessing
-    # -------------------------
-
-    logger.info("Creating preprocessing pipeline.")
-
-    # Preprocessing فقط با Train ساخته می‌شود
-    # تا اطلاعات Validation و Test وارد فرآیند Fit نشوند
+    # ---------------------------------------------------------
+    # 5. Create Preprocessing Pipeline
+    # ---------------------------------------------------------
     preprocessor = create_preprocessor(X_train)
 
-    # -------------------------
-    # 6. Create Model
-    # -------------------------
+    # ---------------------------------------------------------
+    # 6. Create ML Pipeline
+    # ---------------------------------------------------------
+    model = LogisticRegression(**MODEL_PARAMS)
 
-    logger.info("Creating Logistic Regression model.")
-
-    model = LogisticRegression(
-        **MODEL_PARAMS
+    pipeline = Pipeline(
+        [
+            ("preprocessor", preprocessor),
+            ("model", model),
+        ]
     )
+    # ---------------------------------------------------------
+    # 7. Train Model
+    # ---------------------------------------------------------
+    logger.info("Training %s model.", MODEL_TYPE)
 
-    # -------------------------
-    # 7. Create Full Pipeline
-    # -------------------------
+    pipeline.fit(X_train, y_train)
 
-    # ترکیب Preprocessing و Model در یک Pipeline
-    pipeline = Pipeline([
-        ("preprocessor", preprocessor),
-        ("model", model),
-    ])
+    # ---------------------------------------------------------
+    # 8. Evaluate Model on Unseen Test Data
+    # ---------------------------------------------------------
+    predictions = pipeline.predict(X_test)
+    probabilities = pipeline.predict_proba(X_test)[:, 1]
 
-    # -------------------------
-    # 8. Train Model
-    # -------------------------
-
-    logger.info("Model training started.")
-
-    pipeline.fit(
-        X_train,
-        y_train,
-    )
-
-    logger.info("Model training completed.")
-
-    # -------------------------
-    # 9. Validation Evaluation
-    # -------------------------
-
-    logger.info("Evaluating model on Validation Set.")
-
-    validation_metrics = evaluate_model(
-        pipeline,
-        X_val,
-        y_val,
-    )
-    logger.info(
-        "Validation metrics: %s",
-        validation_metrics,
-    )
-
-    # -------------------------
-    # 10. Final Test Evaluation
-    # -------------------------
-
-    # Test Set فقط برای ارزیابی نهایی استفاده می‌شود
-    # و در Training یا Model Selection دخالتی ندارد
-    logger.info("Evaluating model on Test Set.")
-
-    test_metrics = evaluate_model(
-        pipeline,
-        X_test,
+    metrics = calculate_metrics(
         y_test,
+        predictions,
+        probabilities,
     )
 
     logger.info(
-        "Test metrics: %s",
-        test_metrics,
+        "Test metrics - Accuracy: %.4f, Precision: %.4f, "
+        "Recall: %.4f, F1: %.4f, ROC-AUC: %.4f",
+        metrics["accuracy"],
+        metrics["precision"],
+        metrics["recall"],
+        metrics["f1"],
+        metrics["roc_auc"],
     )
 
-    # -------------------------
-    # 11. Save Full Pipeline
-    # -------------------------
+    # ---------------------------------------------------------
+    # 9. Save Versioned Model Artifact
+    # ---------------------------------------------------------
+    MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-    # کل Pipeline ذخیره می‌شود:
-    # Preprocessing + Model
-    joblib.dump(
-        pipeline,
+    joblib.dump(pipeline, MODEL_PATH)
+
+    logger.info(
+        "Model version %s saved to: %s",
+        MODEL_VERSION,
         MODEL_PATH,
     )
 
-    logger.info(
-        "Model pipeline saved to: %s",
-        MODEL_PATH,
+    # ---------------------------------------------------------
+    # 10. Save Model Metadata
+    # ---------------------------------------------------------
+    save_model_metadata(
+        features=X_train.columns.tolist(),
+        metrics=metrics,
     )
 
-    # -------------------------
-    # 12. Save Metrics
-    # -------------------------
-
-    metrics = {
-        "model": "Logistic Regression",
-        "validation": validation_metrics,
-        "test": test_metrics,
-    }
-
-    metrics_path = OUTPUTS_DIR / "metrics.json"
-
-    with open(
-        metrics_path,
-        "w",
-        encoding="utf-8",
-    ) as file:
-        json.dump(
-            metrics,
-            file,
-            indent=4,
-        )
-
-    logger.info(
-        "Metrics saved to: %s",
-        metrics_path,
+    # ---------------------------------------------------------
+    # 11. Register Training Run
+    # ---------------------------------------------------------
+    run = log_training_run(
+        tracking_path=TRACKING_PATH,
+        model_type=MODEL_TYPE,
+        hyperparameters=MODEL_PARAMS,
+        train_size=len(X_train),
+        validation_size=len(X_val),
+        test_size=len(X_test),
+        metrics=metrics,
+        model_version=MODEL_VERSION,
     )
 
     logger.info(
-        "Training process completed successfully."
+        "Training run registered successfully. Run ID: %s",
+        run["run_id"],
     )
+
+    logger.info("Training process completed successfully.")
+
+    return pipeline, metrics, run
 
 
 if __name__ == "__main__":
-    main()
+    train()
